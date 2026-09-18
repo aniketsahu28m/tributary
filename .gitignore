@@ -19,3 +19,6 @@ dist/
 .DS_Store
 .vscode/
 .idea/
+
+# Private working notes — never published
+.notes/
