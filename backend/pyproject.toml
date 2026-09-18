@@ -1,0 +1,8 @@
+[tool.pytest.ini_options]
+# `pythonpath` makes `app` importable no matter which directory pytest is
+# invoked from. Without it the suite only passes when run from `backend/`,
+# which is a trap for anyone cloning the repository and running `pytest` at
+# the root.
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"
