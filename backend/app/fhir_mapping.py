@@ -49,6 +49,15 @@ from fhir.resources.R4B.quantity import Quantity
 from fhir.resources.R4B.reference import Reference
 
 from .models import CitizenObservation, ExpertSample, StreamReach
+from .oah_ig import (
+    OAH_CODE_SYSTEM,
+    OAH_LOCATION_ID_SYSTEM,
+    PROFILE_LOCATION,
+    PROFILE_OBSERVATION,
+    SCT_CITY_ENVIRONMENT,
+    SNOMED,
+    oah_code_for,
+)
 from .terminology import (
     ALL_CONCEPTS,
     CODE_SYSTEM_URI,
@@ -73,7 +82,22 @@ def _coding(code: str) -> Coding:
 
 
 def _concept_cc(code: str) -> CodeableConcept:
-    return CodeableConcept(coding=[_coding(code)])
+    """A CodeableConcept carrying our code and, where one faithfully exists,
+    the OneAquaHealth IG's code for the same concept.
+
+    A CodeableConcept is a set of codings for the *same* concept, so this is
+    what the datatype is for: a receiver that understands the IG resolves the
+    OAH coding and ignores ours. Only mappings that are honest are emitted —
+    see `oah_ig.MAPPINGS`, where several concepts are deliberately unmatched.
+    """
+    codings = [_coding(code)]
+    oah = oah_code_for(code)
+    if oah is not None:
+        oah_code, oah_display = oah
+        codings.append(
+            Coding(system=OAH_CODE_SYSTEM, code=oah_code, display=oah_display)
+        )
+    return CodeableConcept(coding=codings)
 
 
 def _category() -> list[CodeableConcept]:
@@ -102,13 +126,36 @@ def _tier_extension(tier: Tier) -> Extension:
 
 
 def reach_to_location(reach: StreamReach) -> Location:
-    """A monitored stream reach as a FHIR Location."""
+    """A monitored stream reach as a `LocationOah`.
+
+    Conforms to the IG profile, which requires `identifier`, `name` and
+    `mode = #instance`, and constrains `position` to carry both latitude and
+    longitude when present. `type` follows the IG's own examples in using the
+    SNOMED CT concept for a city environment.
+    """
     return Location(
         id=reach.id,
+        meta={"profile": [PROFILE_LOCATION]},
+        # Required 1.. by LocationOah. The IG's examples identify sites under
+        # this system, so we follow it rather than minting our own.
+        identifier=[
+            {"system": OAH_LOCATION_ID_SYSTEM, "value": reach.id}
+        ],
         status="active",
         name=reach.name,
         description=f"{reach.name}, {reach.water_body} ({reach.municipality})",
         mode="instance",
+        type=[
+            CodeableConcept(
+                coding=[
+                    Coding(
+                        system=SNOMED,
+                        code=SCT_CITY_ENVIRONMENT[0],
+                        display=SCT_CITY_ENVIRONMENT[1],
+                    )
+                ]
+            )
+        ],
         physicalType=CodeableConcept(
             coding=[
                 Coding(
@@ -193,6 +240,10 @@ def expert_sample_to_fhir(sample: ExpertSample) -> list[Observation]:
     def _make(suffix: str, code: str, value: float, unit: str) -> Observation:
         return Observation(
             id=f"{sample.id}-{suffix}",
+            # Laboratory results satisfy ObservationIndicatorsOah, which fixes
+            # status to final and requires subject, effective[x] and performer.
+            # Citizen observations cannot make this claim; see oah_ig.
+            meta={"profile": [PROFILE_OBSERVATION]},
             # Verified by a laboratory. This is the FHIR meaning of final.
             status="final",
             category=_category(),

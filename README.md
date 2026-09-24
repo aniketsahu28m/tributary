@@ -146,6 +146,64 @@ defined under our own URI rather than overloading an existing field.
 
 ---
 
+## Conformance with the official OneAquaHealth IG
+
+HL7 Europe maintains a [OneAquaHealth FHIR Implementation
+Guide](https://github.com/hl7-eu/oah) (`hl7.eu.fhir.oah`, canonical
+`http://hl7.eu/fhir/ig/oah`) that profiles exactly this domain.
+
+**We conform where we can.** Reaches are emitted as `LocationOah`, laboratory
+results as `ObservationIndicatorsOah`, both asserted in `meta.profile` and
+checked by tests.
+
+One thing is worth recording. We chose `Observation.subject → Location` on our
+own reasoning — the subject of a stream assessment is a place, not a patient —
+before finding the IG. The IG constrains precisely that:
+
+```
+* subject only Reference(LocationOah)
+```
+
+**We report where we cannot, rather than overclaiming.**
+`ObservationIndicatorsOah` fixes the status:
+
+```
+* status = #final
+```
+
+In FHIR, `final` asserts a verified result. The profile therefore cannot
+represent an *unverified* observation — which is exactly what citizen-science
+evidence is. Citizen submissions here use the same shape, codes and Location
+subject, carry `status = preliminary`, and **deliberately do not assert the
+profile**. Claiming conformance we don't have would let a downstream system
+treat a stranger's phone report as laboratory-grade. There is a test for the
+negative case.
+
+The gap, and the change that would close it, are stated in
+`GET /api/ig-conformance` and in `app/oah_ig.py`.
+
+**Terminology is mapped, not replaced.** `GET
+/fhir/ConceptMap/tributary-to-oah` maps our 13 relevant concepts onto the IG's
+code system using real FHIR equivalence codes:
+
+| Equivalence | Count | Example |
+|---|---|---|
+| `equivalent` | 2 | `diatom-teratology-rate` → `diatomTratology` |
+| `narrower` | 6 | `ibmwp-score` → `macroinvertebreates` |
+| `relatedto` | 1 | `water-clarity` → `tss` |
+| `unmatched` | 4 | `sewage-indicators`, `litter-load`, EQR, WFD status |
+
+Unmatched concepts are recorded as unmatched, with the reason, rather than
+forced onto an approximate code. A mapping that overstates its fidelity is
+worse than an absent one, because downstream analysis cannot see the error.
+
+The unmatched list is itself a finding: the IG has no concept for visible
+evidence of untreated discharge — the single most decision-relevant thing a
+citizen can report — and `coliforms` is a laboratory measurement of a
+different thing.
+
+---
+
 ## Scoring: stated judgements, not fitted parameters
 
 Every weight is an inspectable judgement with a written rationale, isolated in
@@ -208,12 +266,14 @@ can consume.
 | `GET /api/escalations` | The One Health handover queue |
 | `GET /api/reaches/{id}` | Observations, screening and laboratory record |
 | `GET /api/indicators` | Indicator catalogue by tier, with weights and rationales |
+| `GET /api/ig-conformance` | What we conform to in the official IG, and what we cannot |
 | `POST /api/observations` | Submit a citizen observation |
 
 | FHIR R4B | |
 |---|---|
 | `GET /fhir/metadata` | CapabilityStatement |
 | `GET /fhir/CodeSystem/stream-assessment` | The terminology, resolvable |
+| `GET /fhir/ConceptMap/tributary-to-oah` | Our codes mapped onto the official IG |
 | `GET /fhir/Location/{id}` | A stream reach |
 | `GET /fhir/Observation/{id}` | One observation |
 | `GET /fhir/Observation?subject=&status=` | Searchset Bundle |

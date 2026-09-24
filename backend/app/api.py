@@ -28,6 +28,14 @@ from .fhir_mapping import (
     reach_to_location,
 )
 from .models import CitizenObservation, ExpertSample, StreamReach
+from .oah_ig import (
+    OAH_CANONICAL,
+    PROFILE_LOCATION,
+    PROFILE_OBSERVATION,
+    PROPOSED_IG_CHANGE,
+    build_concept_map,
+    unmatched_concepts,
+)
 from .scoring import PRESSURE_WEIGHTS, ScreeningResult
 from .store import Store, seeded_store
 from .terminology import ALL_CONCEPTS, Tier
@@ -305,6 +313,78 @@ def capability_statement() -> dict[str, Any]:
 def code_system() -> dict[str, Any]:
     """The stream-assessment terminology as a resolvable FHIR CodeSystem."""
     return build_code_system().dict()
+
+
+@app.get("/fhir/ConceptMap/tributary-to-oah")
+def concept_map() -> dict[str, Any]:
+    """Our terminology mapped onto the official OneAquaHealth IG code system.
+
+    Concepts with no faithful target are recorded as `unmatched` with the
+    reason rather than forced onto an approximate code. A mapping that
+    overstates its fidelity is worse than an absent one, because downstream
+    analysis cannot see the error.
+    """
+    return build_concept_map()
+
+
+@app.get("/api/ig-conformance")
+def ig_conformance() -> dict[str, Any]:
+    """What this project conforms to in the OneAquaHealth IG, and what it cannot.
+
+    Exposed as data rather than buried in a document so the dashboard can
+    state the position plainly, and so a reviewer can check the claim instead
+    of taking it on trust.
+    """
+    return {
+        "ig": {
+            "name": "OneAquaHealth FHIR Implementation Guide",
+            "publisher": "HL7 Europe",
+            "canonical": OAH_CANONICAL,
+            "package": "hl7.eu.fhir.oah",
+        },
+        "conforms": [
+            {
+                "profile": PROFILE_LOCATION,
+                "applies_to": "Stream reaches",
+                "note": (
+                    "identifier, name and mode=instance supplied; position "
+                    "carries both latitude and longitude."
+                ),
+            },
+            {
+                "profile": PROFILE_OBSERVATION,
+                "applies_to": "Laboratory results",
+                "note": (
+                    "status=final, subject references a LocationOah, "
+                    "performer and effective[x] present."
+                ),
+            },
+        ],
+        "cannotConform": [
+            {
+                "profile": PROFILE_OBSERVATION,
+                "applies_to": "Citizen observations",
+                "reason": (
+                    "ObservationIndicatorsOah fixes status to #final, which in "
+                    "FHIR asserts a verified result. Citizen-science evidence "
+                    "is by construction unverified. These resources therefore "
+                    "use the same shape, codes and Location subject but carry "
+                    "status=preliminary and do NOT assert the profile. "
+                    "Claiming conformance we do not have would let a "
+                    "downstream system treat unverified reports as "
+                    "laboratory-grade."
+                ),
+            }
+        ],
+        "unmatchedConcepts": [
+            {
+                "code": m.source,
+                "reason": m.comment,
+            }
+            for m in unmatched_concepts()
+        ],
+        "proposedIgChange": PROPOSED_IG_CHANGE,
+    }
 
 
 @app.get("/fhir/Location/{reach_id}")
